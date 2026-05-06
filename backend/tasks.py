@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import logging
+import queue
 import threading
 import time
 from pathlib import Path
@@ -14,9 +16,11 @@ from .config import (
     OUTPUT_DIR,
     STORAGE_DIR,
 )
-from .comfy_client import ComfyClient
+from .comfy_client import CancelledError, ComfyClient
 from .jobs import JobStore
 from .workflow import build_prompt, load_workflow, sanitize_prompt_template
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_colors_text(text: str, source: str = '') -> Tuple[str, List[Tuple[str, str]]]:
@@ -69,7 +73,11 @@ class TaskRunner:
         self.workflow_path = DEFAULT_WORKFLOW
         self.colors_txt = DEFAULT_COLORS_TXT
         self.default_output_dir = OUTPUT_DIR
-        self._lock = threading.Lock()
+        self._task_queue: queue.Queue = queue.Queue()
+        self._cancel_events: Dict[str, threading.Event] = {}
+        self._cancel_lock = threading.Lock()
+        self._worker = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker.start()
 
     def submit(
         self,
@@ -92,20 +100,62 @@ class TaskRunner:
             message='queued',
             garment_name=garment_name,
             input_name=first_image.name,
-            output_dir=str(self.default_output_dir / job.job_id),
+            output_dir=str(self.default_output_dir / 'pending'),
             created_at=time.time(),
             updated_at=time.time(),
         )
-        thread = threading.Thread(
-            target=self._run_job,
-            args=(job.job_id, garment_name, colors_text, image_paths, prompt_template, guidance, steps, steps_8, enable_lora, enable_8_step_lora, target_width, target_height),
-            daemon=True,
+        self.store.update(job.job_id, output_dir=str(self.default_output_dir / job.job_id))
+        cancel_event = threading.Event()
+        with self._cancel_lock:
+            self._cancel_events[job.job_id] = cancel_event
+        args = (
+            job.job_id, garment_name, colors_text, image_paths,
+            prompt_template, guidance, steps, steps_8,
+            enable_lora, enable_8_step_lora, target_width, target_height,
         )
-        thread.start()
+        self._task_queue.put((cancel_event, args))
         return job.job_id
+
+    def cancel(self, job_id: str) -> bool:
+        job = self.store.get(job_id)
+        if not job:
+            return False
+        if job.status not in ('queued', 'running'):
+            return False
+        self.store.update(
+            job_id,
+            cancelled=True,
+            status='cancelling',
+            message='cancelling...',
+            updated_at=time.time(),
+        )
+        with self._cancel_lock:
+            event = self._cancel_events.get(job_id)
+        if event:
+            event.set()
+        return True
+
+    def _worker_loop(self) -> None:
+        while True:
+            try:
+                cancel_event, args = self._task_queue.get()
+                job_id = args[0]
+                if cancel_event.is_set():
+                    self.store.update(job_id, status='cancelled', message='cancelled', updated_at=time.time())
+                    self._cleanup_cancel_event(job_id)
+                    continue
+                self._run_job(cancel_event, *args)
+                self._cleanup_cancel_event(job_id)
+            except Exception:
+                logger.exception('Worker loop error')
+
+    def _cleanup_cancel_event(self, job_id: str) -> None:
+        with self._cancel_lock:
+            self._cancel_events.pop(job_id, None)
 
     def _run_job(
         self,
+        cancel_event: threading.Event,
         job_id: str,
         garment_name: str,
         colors_text: str,
@@ -136,10 +186,16 @@ class TaskRunner:
             generated_files: List[Path] = []
 
             for image_path in image_paths:
+                if cancel_event.is_set():
+                    raise CancelledError()
+
                 self.store.update(job_id, message=f'uploading {image_path.name}', progress=max(8, int((done_jobs / total_jobs) * 100)), updated_at=time.time())
                 comfy_image_name = self.client.upload_image(image_path)
 
                 for color_name, hex_value in colors:
+                    if cancel_event.is_set():
+                        raise CancelledError()
+
                     rgb = hex_to_rgb(hex_value)
                     prompt = build_prompt(garment_name_from_txt, hex_value, rgb, template=prompt_template)
                     workflow = self._prepare_workflow(
@@ -158,7 +214,12 @@ class TaskRunner:
                     )
                     self.store.update(job_id, message=f'generating {image_path.name} / {color_name}', progress=int((done_jobs / total_jobs) * 100), updated_at=time.time())
                     prompt_id = self.client.queue_prompt(workflow)
-                    history_entry = self.client.wait_for_completion(prompt_id, wait_seconds=2.0, timeout=1200.0)
+                    try:
+                        history_entry = self.client.wait_for_completion(prompt_id, wait_seconds=2.0, timeout=1200.0, cancel_event=cancel_event)
+                    except CancelledError:
+                        self.client.interrupt()
+                        raise
+
                     output_images = self.client.extract_output_images(history_entry)
                     if output_images:
                         for image_idx, image_info in enumerate(output_images, start=1):
@@ -184,6 +245,8 @@ class TaskRunner:
             if not generated_files:
                 raise RuntimeError('No output images generated')
             self.store.update(job_id, status='completed', progress=100, message='completed', updated_at=time.time())
+        except CancelledError:
+            self.store.update(job_id, status='cancelled', message='cancelled', updated_at=time.time())
         except Exception as exc:
             self.store.update(job_id, status='failed', message='failed', error=str(exc), updated_at=time.time())
 

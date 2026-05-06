@@ -124,6 +124,17 @@ def get_job(job_id: str) -> dict:
     return job.__dict__
 
 
+@app.post('/api/jobs/{job_id}/cancel')
+def cancel_job(job_id: str) -> dict:
+    job = STORE.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail='job not found')
+    ok = RUNNER.cancel(job_id)
+    if not ok:
+        raise HTTPException(status_code=409, detail=f'job is {job.status}, cannot cancel')
+    return {'job_id': job_id, 'status': 'cancelling'}
+
+
 @app.get('/api/jobs/{job_id}/download')
 def download_job(job_id: str):
     zip_path = RUNNER.zip_job_output(job_id)

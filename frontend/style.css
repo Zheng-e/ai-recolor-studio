@@ -33,6 +33,24 @@ button:hover, .link-btn:hover { filter: brightness(1.06); }
 .badge-running { background: rgba(59, 130, 246, 0.16); color: #bfdbfe; }
 .badge-completed { background: rgba(34, 197, 94, 0.16); color: #bbf7d0; }
 .badge-failed { background: rgba(239, 68, 68, 0.16); color: #fecaca; }
+.badge-cancelling { background: rgba(251, 146, 60, 0.16); color: #fed7aa; }
+.badge-cancelled { background: rgba(148, 163, 184, 0.16); color: #94a3b8; }
+.cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #dc2626, #ea580c);
+  color: white;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  margin-top: 8px;
+}
+.cancel-btn:hover { filter: brightness(1.1); }
+.cancel-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .progress { height: 9px; border-radius: 999px; background: rgba(148, 163, 184, 0.14); overflow: hidden; margin: 10px 0; }
 .progress > div { height: 100%; background: linear-gradient(90deg, #22c55e, #3b82f6); }
 .meta { color: #91a4bf; font-size: 12px; margin-top: 4px; }

@@ -124,3 +124,26 @@ class TestPathSanitization:
         )
         assert resp.status_code == 200
         # The job should succeed but the filename should be sanitized
+
+
+class TestCancelJobEndpoint:
+    def test_cancel_queued_job(self, client, monkeypatch):
+        monkeypatch.setattr('backend.main.RUNNER.cancel', lambda job_id: True)
+        STORE.create(status='queued')
+        jobs = STORE.list()
+        job_id = jobs[0].job_id
+        resp = client.post(f'/api/jobs/{job_id}/cancel')
+        assert resp.status_code == 200
+        assert resp.json()['status'] == 'cancelling'
+
+    def test_cancel_completed_job_returns_409(self, client, monkeypatch):
+        monkeypatch.setattr('backend.main.RUNNER.cancel', lambda job_id: False)
+        STORE.create(status='completed')
+        jobs = STORE.list()
+        job_id = jobs[0].job_id
+        resp = client.post(f'/api/jobs/{job_id}/cancel')
+        assert resp.status_code == 409
+
+    def test_cancel_nonexistent_job(self, client):
+        resp = client.post('/api/jobs/nonexistent/cancel')
+        assert resp.status_code == 404

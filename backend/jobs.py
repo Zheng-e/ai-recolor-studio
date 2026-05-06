@@ -21,6 +21,7 @@ class JobRecord:
     created_at: float = 0.0
     updated_at: float = 0.0
     error: Optional[str] = None
+    cancelled: bool = False
 
 
 class JobStore:

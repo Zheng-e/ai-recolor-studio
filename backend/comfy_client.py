@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 from urllib.parse import urljoin
 
 import requests
+
+
+class CancelledError(Exception):
+    """Raised when a job is cancelled by the user."""
+    pass
 
 
 class ComfyClient:
@@ -32,15 +38,31 @@ class ComfyClient:
         resp.raise_for_status()
         return resp.json()
 
-    def wait_for_completion(self, prompt_id: str, wait_seconds: float = 2.0, timeout: float = 600.0) -> Dict:
+    def wait_for_completion(self, prompt_id: str, wait_seconds: float = 2.0, timeout: float = 600.0, cancel_event: Optional[threading.Event] = None) -> Dict:
         start = time.time()
         while True:
+            if cancel_event is not None and cancel_event.is_set():
+                raise CancelledError()
             history = self.get_history(prompt_id)
             if prompt_id in history:
                 return history[prompt_id]
             if time.time() - start > timeout:
                 raise TimeoutError(f'ComfyUI job timed out: {prompt_id}')
             time.sleep(wait_seconds)
+
+    def interrupt(self) -> None:
+        try:
+            resp = requests.post(f'{self.comfy_url}/interrupt', timeout=10)
+            resp.raise_for_status()
+        except requests.RequestException:
+            pass
+
+    def queue_delete(self, prompt_id: str) -> None:
+        try:
+            resp = requests.post(f'{self.comfy_url}/queue', json={'delete': [prompt_id]}, timeout=10)
+            resp.raise_for_status()
+        except requests.RequestException:
+            pass
 
     def view_image(self, filename: str, subfolder: str = '', type_: str = 'output') -> bytes:
         params = {'filename': filename, 'subfolder': subfolder, 'type': type_}

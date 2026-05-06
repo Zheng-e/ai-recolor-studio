@@ -93,6 +93,7 @@ function jobCard(job) {
   const div = document.createElement('div');
   div.className = 'job';
   const colorCount = (job.colors || []).length;
+  const canCancel = job.status === 'queued' || job.status === 'running';
   div.innerHTML = `
     <div class="job-top">
       <div>
@@ -104,10 +105,25 @@ function jobCard(job) {
     <div class="progress"><div style="width:${job.progress || 0}%"></div></div>
     <div class="meta">${escapeHtml(job.message || '')}</div>
     <div class="meta">进度：${job.progress || 0}% · 颜色数：${colorCount}</div>
+    ${canCancel ? `<button class="cancel-btn" onclick="cancelJob('${escapeHtml(job.job_id)}', this)">取消任务</button>` : ''}
     ${job.status === 'completed' ? `<a class="link-btn" href="/api/jobs/${encodeURIComponent(job.job_id)}/download">下载结果</a>` : ''}
     ${job.status === 'failed' ? `<div class="meta error">${escapeHtml(job.error || '')}</div>` : ''}
   `;
   return div;
+}
+
+async function cancelJob(jobId, btn) {
+  if (!confirm('确定要取消这个任务吗？')) return;
+  btn.disabled = true;
+  btn.textContent = '取消中...';
+  try {
+    await api(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
+    await refreshJobs();
+  } catch (err) {
+    alert(err.message || '取消失败');
+    btn.disabled = false;
+    btn.textContent = '取消任务';
+  }
 }
 
 async function refreshJobs() {
