@@ -24,6 +24,22 @@ async function api(url, options = {}) {
   return resp.json();
 }
 
+async function pickBestServer() {
+  const results = await Promise.allSettled(
+    SERVERS.map(s => fetchFromServer(s.url, '/api/health').then(data => ({
+      url: s.url,
+      name: s.name,
+      busy: (data.running_jobs || 0) + (data.queued_jobs || 0),
+    })))
+  );
+  const available = results
+    .filter(r => r.status === 'fulfilled')
+    .map(r => r.value)
+    .sort((a, b) => a.busy - b.busy);
+  if (available.length === 0) throw new Error('所有服务器均不可用');
+  return available[0];
+}
+
 function escapeHtml(text) {
   return String(text || '')
     .replaceAll('&', '&amp;')
@@ -350,7 +366,17 @@ async function submitJob() {
     if (images.length > 0) form.append('image', images[0]);
     images.forEach(file => form.append('images', file));
     form.append('colors_text', colorsText);
-    const result = await api('/api/jobs', { method: 'POST', body: form });
+    let submitUrl;
+    if (currentServerUrl) {
+      submitUrl = currentServerUrl + '/api/jobs';
+    } else {
+      const best = await pickBestServer();
+      submitUrl = best.url + '/api/jobs';
+      status.textContent = `分配到 ${best.name}（负载最低）...`;
+    }
+    const resp = await fetch(submitUrl, { method: 'POST', body: form });
+    if (!resp.ok) throw new Error(await resp.text());
+    const result = await resp.json();
     status.textContent = `已提交任务 ${folderName || result.job_id}`;
     await refreshJobs();
   } catch (err) {
