@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import time
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -40,6 +42,11 @@ if STATIC_DIR.exists():
 @app.get('/', response_class=HTMLResponse)
 def index() -> str:
     return (STATIC_DIR / 'index.html').read_text(encoding='utf-8')
+
+
+@app.get('/dashboard', response_class=HTMLResponse)
+def dashboard() -> str:
+    return (STATIC_DIR / 'dashboard.html').read_text(encoding='utf-8')
 
 
 @app.get('/api/defaults')
@@ -214,6 +221,49 @@ def list_models() -> dict:
         {'id': 'gpt-image-2', 'label': 'GPT Image 2 (官方)', 'priority': 2},
         {'id': 'gemini-3.1-flash-image-preview', 'label': 'Gemini 3.1 Flash', 'priority': 3},
     ]}
+
+
+@app.get('/api/stats')
+def stats() -> dict:
+    jobs = STORE.list()
+    by_status = dict(Counter(j.status for j in jobs))
+    by_engine = dict(Counter(j.engine or 'comfyui' for j in jobs))
+    by_model = dict(Counter(j.api_model for j in jobs if j.engine == 'api' and j.api_model))
+    products = len(set(j.product_id for j in jobs if j.product_id))
+    total_combos = 0
+    completed_combos = 0
+    for j in jobs:
+        n_colors = max(1, len(j.colors)) if j.colors else 1
+        total_combos += len(j.image_paths) * n_colors
+        completed_combos += len(j.completed_combos or [])
+    durations = []
+    for j in jobs:
+        if j.status == 'completed' and j.created_at > 0 and j.updated_at > j.created_at:
+            durations.append(j.updated_at - j.created_at)
+    avg_duration = sum(durations) / len(durations) if durations else 0
+    # daily submissions (last 7 days)
+    now = datetime.now(timezone.utc)
+    daily = {}
+    for i in range(7):
+        day = (now - timedelta(days=i)).strftime('%Y-%m-%d')
+        daily[day] = 0
+    for j in jobs:
+        if j.created_at > 0:
+            day = datetime.fromtimestamp(j.created_at, tz=timezone.utc).strftime('%Y-%m-%d')
+            if day in daily:
+                daily[day] += 1
+    return {
+        'total_jobs': len(jobs),
+        'by_status': by_status,
+        'by_engine': by_engine,
+        'by_model': by_model,
+        'products': products,
+        'total_combos': total_combos,
+        'completed_combos': completed_combos,
+        'completion_rate': round(completed_combos / total_combos, 4) if total_combos else 0,
+        'avg_duration_seconds': round(avg_duration, 1),
+        'daily_submissions': daily,
+    }
 
 
 @app.get('/api/health')

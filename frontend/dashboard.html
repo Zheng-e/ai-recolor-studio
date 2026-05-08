@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>改色工作台 - 看板</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <nav class="top-nav">
+    <div class="nav-inner">
+      <div class="nav-brand">
+        <div class="brand-badge">FX</div>
+        <span>改色工作台</span>
+      </div>
+      <div class="nav-links">
+        <a href="/" class="nav-link">工作台</a>
+        <a href="/dashboard" class="nav-link active">看板</a>
+      </div>
+      <div class="nav-right">
+        <select id="serverSelect" class="nav-select">
+          <option value="">自动 (负载均衡)</option>
+          <option value="http://192.168.0.186:8000">服务器 A (186)</option>
+          <option value="http://192.168.0.34:8000">服务器 B (34)</option>
+        </select>
+        <span id="serverStatus" class="nav-status"></span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="dashboard">
+    <!-- Stats Cards -->
+    <section class="stats-cards">
+      <div class="stat-card">
+        <div class="stat-value" id="statProducts">0</div>
+        <div class="stat-label">商品总数</div>
+      </div>
+      <div class="stat-card stat-card-green">
+        <div class="stat-value" id="statCompleted">0</div>
+        <div class="stat-label">已完成</div>
+      </div>
+      <div class="stat-card stat-card-blue">
+        <div class="stat-value" id="statActive">0</div>
+        <div class="stat-label">进行中</div>
+      </div>
+      <div class="stat-card stat-card-red">
+        <div class="stat-value" id="statFailed">0</div>
+        <div class="stat-label">失败/暂停</div>
+      </div>
+      <div class="stat-card stat-card-purple">
+        <div class="stat-value" id="statCombos">0</div>
+        <div class="stat-label">总改色组合</div>
+      </div>
+      <div class="stat-card stat-card-cyan">
+        <div class="stat-value" id="statRate">0%</div>
+        <div class="stat-label">完成率</div>
+      </div>
+    </section>
+
+    <!-- Charts Row -->
+    <section class="charts-row">
+      <div class="chart-card">
+        <h3>任务状态分布</h3>
+        <div class="chart-container">
+          <canvas id="statusChart"></canvas>
+        </div>
+      </div>
+      <div class="chart-card">
+        <h3>引擎使用分布</h3>
+        <div class="chart-container">
+          <canvas id="engineChart"></canvas>
+        </div>
+      </div>
+      <div class="chart-card">
+        <h3>每日提交量（近 7 天）</h3>
+        <div class="chart-container">
+          <canvas id="dailyChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Jobs Table -->
+    <section class="dashboard-table-section">
+      <div class="table-header">
+        <h2>任务明细</h2>
+        <div class="table-controls">
+          <input id="tableSearch" type="text" placeholder="搜索商品名..." class="table-search" />
+          <select id="tableFilter" class="table-filter">
+            <option value="">全部状态</option>
+            <option value="completed">已完成</option>
+            <option value="running">运行中</option>
+            <option value="queued">排队中</option>
+            <option value="failed">失败</option>
+            <option value="paused">暂停</option>
+            <option value="cancelled">已取消</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table class="dashboard-table">
+          <thead>
+            <tr>
+              <th>商品编号</th>
+              <th>商品名称</th>
+              <th>状态</th>
+              <th>引擎</th>
+              <th>图片数</th>
+              <th>颜色数</th>
+              <th>进度</th>
+              <th>创建时间</th>
+              <th>耗时</th>
+            </tr>
+          </thead>
+          <tbody id="jobsTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>
