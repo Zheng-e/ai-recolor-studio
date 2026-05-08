@@ -67,6 +67,15 @@ class JobStore:
         with self._lock:
             return list(self._jobs.values())
 
+    def delete(self, job_id: str) -> bool:
+        with self._lock:
+            if job_id not in self._jobs:
+                return False
+            del self._jobs[job_id]
+        from .persistence import delete_job_record
+        delete_job_record(job_id)
+        return True
+
     def to_dict(self, job_id: str) -> Optional[Dict]:
         job = self.get(job_id)
         return asdict(job) if job else None

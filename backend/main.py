@@ -155,6 +155,48 @@ def resume_job(job_id: str) -> dict:
     return {'job_id': job_id, 'status': 'queued'}
 
 
+@app.delete('/api/jobs/{job_id}')
+def delete_job(job_id: str) -> dict:
+    job = STORE.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail='job not found')
+    if job.status in ('running', 'queued'):
+        raise HTTPException(status_code=409, detail='cannot delete running/queued job, cancel it first')
+    # clean up files
+    if job.output_dir:
+        out_dir = Path(job.output_dir)
+        if out_dir.exists():
+            import shutil
+            shutil.rmtree(out_dir, ignore_errors=True)
+    # remove from store
+    STORE.delete(job_id)
+    return {'job_id': job_id, 'deleted': True}
+
+
+@app.post('/api/jobs/batch-delete')
+def batch_delete_jobs(body: dict) -> dict:
+    job_ids = body.get('job_ids', [])
+    if not job_ids:
+        raise HTTPException(status_code=400, detail='no job_ids provided')
+    deleted = []
+    skipped = []
+    for jid in job_ids:
+        job = STORE.get(jid)
+        if not job:
+            continue
+        if job.status in ('running', 'queued'):
+            skipped.append(jid)
+            continue
+        if job.output_dir:
+            out_dir = Path(job.output_dir)
+            if out_dir.exists():
+                import shutil
+                shutil.rmtree(out_dir, ignore_errors=True)
+        STORE.delete(jid)
+        deleted.append(jid)
+    return {'deleted': deleted, 'skipped': skipped}
+
+
 @app.get('/api/jobs/{job_id}/download')
 def download_job(job_id: str):
     zip_path = RUNNER.zip_job_output(job_id)

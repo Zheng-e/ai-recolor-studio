@@ -96,6 +96,12 @@
           <div class="section-actions"><button id="refreshBtn">刷新任务</button></div>
         </div>
         <div id="submitStatus" class="submit-status"></div>
+        <div id="batchActions" class="batch-actions" style="display:none">
+          <button onclick="selectAll()" class="batch-btn">全选</button>
+          <button onclick="clearSelection()" class="batch-btn batch-btn-secondary">取消选择</button>
+          <span id="selectedCount" class="batch-count">已选 0 项</span>
+          <button id="batchDeleteBtn" onclick="deleteSelected()" class="batch-btn batch-btn-danger">删除选中</button>
+        </div>
         <div id="jobsList" class="jobs-list"></div>
       </section>
     </main>

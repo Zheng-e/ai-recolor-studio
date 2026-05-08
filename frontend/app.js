@@ -4,6 +4,7 @@ const SERVERS = [
 ];
 
 let currentServerUrl = '';  // empty = auto (nginx)
+let selectedJobIds = new Set();
 
 async function fetchFromServer(baseUrl, url, options = {}) {
   const fullUrl = baseUrl + url;
@@ -112,24 +113,30 @@ function jobCard(job) {
   const colorCount = (job.colors || []).length;
   const canCancel = job.status === 'queued' || job.status === 'running';
   const canResume = ['paused', 'failed', 'cancelled'].includes(job.status) && (job.completed_combos || []).length > 0;
+  const canDelete = !canCancel; // can delete if not running/queued
   const totalCombos = (job.image_paths || []).length * colorCount;
   const completedCount = (job.completed_combos || []).length;
   const serverLabel = job._server ? `<span class="server-tag">${escapeHtml(job._server)}</span>` : '';
+  const checked = selectedJobIds.has(job.job_id) ? 'checked' : '';
   div.innerHTML = `
     <div class="job-top">
-      <div>
+      <div class="job-title-row">
+        <input type="checkbox" class="job-checkbox" data-job-id="${escapeHtml(job.job_id)}" data-server-url="${escapeHtml(job._serverUrl || '')}" ${checked} onchange="toggleJobSelect(this)" />
         <strong>${escapeHtml(job.product_id || job.job_id)}</strong>
         ${serverLabel}
-        <div class="meta">${escapeHtml(job.garment_name || '')} · ${escapeHtml(job.input_name || '')}</div>
       </div>
       <span class="badge badge-${escapeHtml(job.status)}">${escapeHtml(job.status)}</span>
     </div>
+    <div class="meta">${escapeHtml(job.garment_name || '')} · ${escapeHtml(job.input_name || '')}</div>
     <div class="progress"><div style="width:${job.progress || 0}%"></div></div>
     <div class="meta">${escapeHtml(job.message || '')}</div>
     <div class="meta">进度：${job.progress || 0}% · 颜色数：${colorCount}${completedCount > 0 ? ` · 已完成：${completedCount}/${totalCombos}` : ''}</div>
-    ${canCancel ? `<button class="cancel-btn" onclick="cancelJob('${escapeHtml(job.job_id)}', '${escapeHtml(job._serverUrl || '')}', this)">取消任务</button>` : ''}
-    ${canResume ? `<button class="resume-btn" onclick="resumeJob('${escapeHtml(job.job_id)}', '${escapeHtml(job._serverUrl || '')}', this)">恢复任务</button>` : ''}
-    ${job.status === 'completed' ? `<a class="link-btn" href="${escapeHtml(job._serverUrl || '')}/api/jobs/${encodeURIComponent(job.job_id)}/download">下载结果</a>` : ''}
+    <div class="job-actions">
+      ${canCancel ? `<button class="cancel-btn" onclick="cancelJob('${escapeHtml(job.job_id)}', '${escapeHtml(job._serverUrl || '')}', this)">取消任务</button>` : ''}
+      ${canResume ? `<button class="resume-btn" onclick="resumeJob('${escapeHtml(job.job_id)}', '${escapeHtml(job._serverUrl || '')}', this)">恢复任务</button>` : ''}
+      ${job.status === 'completed' ? `<a class="link-btn" href="${escapeHtml(job._serverUrl || '')}/api/jobs/${encodeURIComponent(job.job_id)}/download">下载结果</a>` : ''}
+      ${canDelete ? `<button class="delete-btn" onclick="deleteJob('${escapeHtml(job.job_id)}', '${escapeHtml(job._serverUrl || '')}', this)">删除</button>` : ''}
+    </div>
     ${job.status === 'failed' ? `<div class="meta error">${escapeHtml(job.error || '')}</div>` : ''}
   `;
   return div;
@@ -148,6 +155,93 @@ async function cancelJob(jobId, serverUrl, btn) {
     alert(err.message || '取消失败');
     btn.disabled = false;
     btn.textContent = '取消任务';
+  }
+}
+
+async function deleteJob(jobId, serverUrl, btn) {
+  if (!confirm('确定要删除这个任务吗？')) return;
+  btn.disabled = true;
+  btn.textContent = '删除中...';
+  try {
+    const baseUrl = serverUrl || currentServerUrl || '';
+    const resp = await fetch(`${baseUrl}/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+    if (!resp.ok) throw new Error(await resp.text());
+    selectedJobIds.delete(jobId);
+    await refreshJobs();
+  } catch (err) {
+    alert(err.message || '删除失败');
+    btn.disabled = false;
+    btn.textContent = '删除';
+  }
+}
+
+function toggleJobSelect(checkbox) {
+  const jobId = checkbox.dataset.jobId;
+  if (checkbox.checked) {
+    selectedJobIds.add(jobId);
+  } else {
+    selectedJobIds.delete(jobId);
+  }
+  updateBatchButtons();
+}
+
+function selectAll() {
+  document.querySelectorAll('.job-checkbox').forEach(cb => {
+    cb.checked = true;
+    selectedJobIds.add(cb.dataset.jobId);
+  });
+  updateBatchButtons();
+}
+
+function clearSelection() {
+  document.querySelectorAll('.job-checkbox').forEach(cb => cb.checked = false);
+  selectedJobIds.clear();
+  updateBatchButtons();
+}
+
+function updateBatchButtons() {
+  const batchBar = document.getElementById('batchActions');
+  if (batchBar) {
+    batchBar.style.display = selectedJobIds.size > 0 ? 'flex' : 'none';
+    const countEl = document.getElementById('selectedCount');
+    if (countEl) countEl.textContent = `已选 ${selectedJobIds.size} 项`;
+  }
+}
+
+async function deleteSelected() {
+  if (selectedJobIds.size === 0) return;
+  if (!confirm(`确定要删除选中的 ${selectedJobIds.size} 个任务吗？`)) return;
+
+  // Group by server
+  const byServer = {};
+  document.querySelectorAll('.job-checkbox:checked').forEach(cb => {
+    const serverUrl = cb.dataset.serverUrl || '';
+    if (!byServer[serverUrl]) byServer[serverUrl] = [];
+    byServer[serverUrl].push(cb.dataset.jobId);
+  });
+
+  const btn = document.getElementById('batchDeleteBtn');
+  btn.disabled = true;
+  btn.textContent = '删除中...';
+
+  try {
+    for (const [serverUrl, jobIds] of Object.entries(byServer)) {
+      const baseUrl = serverUrl || currentServerUrl || '';
+      const resp = await fetch(`${baseUrl}/api/jobs/batch-delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_ids: jobIds })
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+    }
+    selectedJobIds.clear();
+    await refreshJobs();
+  } catch (err) {
+    alert(err.message || '批量删除失败');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '删除选中';
+    updateBatchButtons();
   }
 }
 
@@ -209,6 +303,7 @@ async function refreshJobs() {
   const list = document.getElementById('jobsList');
   list.innerHTML = '';
   allJobs.forEach(job => list.appendChild(jobCard(job)));
+  updateBatchButtons();
 }
 
 async function loadDefaults() {
@@ -311,4 +406,7 @@ async function refreshServerStatus() {
 loadDefaults();
 refreshServerStatus();
 refreshJobs();
-setInterval(refreshJobs, 3000);
+setInterval(() => {
+  refreshJobs();
+  refreshServerStatus();
+}, 3000);
